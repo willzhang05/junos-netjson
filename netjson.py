@@ -21,7 +21,7 @@ def get_interface_ip_addresses(dev, ifl, primary_only=False):
             break
     addr = []
     addr_find = etree.XPath("interface-address")
-    if filtered:
+    if filtered is not None:
         matches = addr_find(filtered)
         for m in matches:
             if primary_only:
@@ -45,29 +45,32 @@ def get_interface_ip_addresses(dev, ifl, primary_only=False):
 def main():
     dev = Device()
     dev.open()
-    output = dev.rpc.get_interface_information()
-    find = etree.XPath("//logical-interface/name")
-    matches = find(output)
-    addresses = []
-    for m in matches:
-        name = m.text.strip()
-        addr = get_interface_ip_addresses(dev, name, primary_only=True)
-        addresses += addr
-        #print(output)
-    output = dev.rpc.get_system_information()
-    hostname_find = etree.XPath("//host-name")
-    hostname = hostname_find(output)[0].text
-    print(hostname)
+    ifaces = []
+    addresses = []   
 
-    hex_hostname = bytes(hostname.ljust(16))
-    print(hex_hostname)
-    print(type(hex_hostname))
-    host_id = uuid.UUID(bytes=hex_hostname)
+    output = dev.rpc.get_lldp_local_info()
+    if_find = etree.XPath("//lldp-local-interface-name")
+    lldp_if = if_find(output)
+    if len(lldp_if) != 0:
+        for iface in lldp_if:
+            ifaces.append(iface.text.strip())
+    for i in ifaces:
+        addr = get_interface_ip_addresses(dev, i, primary_only=True)
+        addresses += addr
+
+    hostname_find = etree.XPath("//lldp-local-system-name")
+    hostname = hostname_find(output)[0].text.strip()
+
+    id_find = etree.XPath("//lldp-local-chassis-id")
+    host_id = str(hostname + ''.join(id_find(output)[0].text.split(":")))
+
+    hex_host_id = bytes(host_id.ljust(16)[:16])
+    host_id = uuid.UUID(bytes=hex_host_id)
 
     data = {}
     data['id'] = str(host_id)
     data['label'] = hostname
-    data['local_addresses'] = set(addresses)
+    data['local_addresses'] = addresses
     print(data)
     dev.close()
     return
