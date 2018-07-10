@@ -84,8 +84,8 @@ def get_node_info(dev):
     data["properties"] = {}
     data["properties"]["hostname"] = hostname
     data["properties"]["address"] = mgmt_addr
-    data["local_addresses"] = addresses
-    return data
+    #data["local_addresses"] = addresses
+    return (ifaces, data)
 
 
 def get_link_info(dev, node_data):
@@ -104,8 +104,8 @@ def get_link_info(dev, node_data):
     return data
 
 
-def get_neighbor_info(dev):
-    output = dev.rpc.get_lldp_neighbors_information()
+def get_neighbor_info(dev, iface):
+    output = dev.rpc.get_lldp_interface_neighbors(interface_device=iface)
     neighbor_find = etree.XPath("//lldp-neighbor-information")
     neighbors = neighbor_find(output)
     data = []
@@ -116,8 +116,17 @@ def get_neighbor_info(dev):
 
         hostname_find = etree.XPath("//lldp-remote-system-name")
         hostname = hostname_find(neighbor)[0].text
+
+        mgmt_addr_find = etree.XPath("//lldp-remote-management-address")
+        mgmt_addr = mgmt_addr_find(neighbor)
+        address = mgmt_addr[0].text.strip() if len(
+            mgmt_addr) != 0 else 'unknown'
         entry["id"] = chassis_id
-        entry["label"] = hostname
+        entry["label"] = hostname + " - " + address
+        entry["properties"] = {}
+        entry["properties"]["hostname"] = hostname
+        entry["properties"]["address"] = address
+        #entry["local_addresses"] = addresses
         data.append(entry)
 
     return data
@@ -149,9 +158,19 @@ def main():
     dev = Device()
     dev.open()
 
-    node_data = get_node_info(dev)
+    node_if, node_data = get_node_info(dev)
     link_data = get_link_info(dev, node_data)
-    neighbor_data = get_neighbor_info(dev)
+    neighbor_data = []
+
+    print(node_if)
+    neighbor_ids = set()
+    for iface in node_if:
+        neighbors = get_neighbor_info(dev, iface)
+        for neighbor in neighbors:
+            if neighbor['id'] not in neighbor_ids:
+                neighbor_ids.add(neighbor['id'])
+                neighbor_data.append(neighbor)
+
     dev.close()
 
     graph["type"] = "NetworkGraph"
@@ -200,7 +219,6 @@ def main():
         conn_path = url.path + "?key=" + params['key'][0]
         print(conn_path)
         params = json.dumps(graph)
-        #params = urllib.urlencode(params)
         conn.request("POST", conn_path, params)
         response = conn.getresponse()
         print(response.status, response.reason)
