@@ -42,12 +42,9 @@ def get_interface_ip_addresses(dev, ifl, primary_only=False):
     return addr
 
 
-def main():
-    dev = Device()
-    dev.open()
+def get_node_info(dev):
     ifaces = []
     addresses = []   
-
     output = dev.rpc.get_lldp_local_info()
     if_find = etree.XPath("//lldp-local-interface-name")
     lldp_if = if_find(output)
@@ -71,7 +68,16 @@ def main():
     data['id'] = str(host_id)
     data['label'] = hostname
     data['local_addresses'] = addresses
-    print(data)
+    return (ifaces,data)
+
+def main():
+    dev = Device()
+    dev.open()
+
+    node_ifaces, node_data = get_node_info(dev)
+    print(node_ifaces)
+    print(node_data)
+    
     dev.close()
     return
 
