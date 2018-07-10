@@ -3,10 +3,14 @@
 from junos import Junos_Context
 from jnpr.junos import Device
 from lxml import etree
+import argparse
 import jcs
 import httplib
 import urllib
+import urlparse
 import uuid
+import json
+import httplib
 
 
 def get_interface_ip_addresses(dev, ifl, primary_only=False):
@@ -68,18 +72,18 @@ def get_node_info(dev):
 
     id_find = etree.XPath("//lldp-local-chassis-id")
     chassis_id = id_find(output)[0].text
-    host_id = str(hostname + ''.join(chassis_id.split(":")))
+    host_id = str(hostname + "".join(chassis_id.split(":")))
 
     hex_host_id = bytes(host_id.ljust(16)[:16])
     host_id = uuid.UUID(bytes=hex_host_id)
 
     data = {}
-    data['id'] = chassis_id
-    data['label'] = hostname + " - " + mgmt_addr
-    data['properties'] = {}
-    data['properties']['hostname'] = hostname
-    data['properties']['address'] = mgmt_addr
-    data['local_addresses'] = addresses
+    data["id"] = chassis_id
+    data["label"] = hostname + " - " + mgmt_addr
+    data["properties"] = {}
+    data["properties"]["hostname"] = hostname
+    data["properties"]["address"] = mgmt_addr
+    data["local_addresses"] = addresses
     return (ifaces, data)
 
 
@@ -91,24 +95,52 @@ def get_link_info(dev, node_data):
     data = []
     for neighbor in neighbors:
         entry = {}
-        entry['source'] = node_data['id']
-        entry['target'] = neighbor.text.strip()
+        entry["source"] = node_data["id"]
+        entry["target"] = neighbor.text.strip()
+        entry["cost"] = 1
         data.append(entry)
 
     return data
 
 
 def main():
+    arguments = {"url": "API POST Endpoint to send NetJSON to."}
+    parser = argparse.ArgumentParser(description="NetJSON op script")
+    for key in arguments:
+        parser.add_argument(('-' + key), required=False, help=arguments[key])
+    args = parser.parse_args()
+
     dev = Device()
     dev.open()
 
     node_ifaces, node_data = get_node_info(dev)
-    print(node_data)
     link_data = get_link_info(dev, node_data)
-    print(link_data)
     dev.close()
+    graph = {}
+    graph["type"] = "NetworkGraph"
+    graph["protocol"] = "static"
+    graph["version"] = 1.0
+    graph["metric"] = 1.0
+    graph["nodes"] = [node_data]
+    graph["links"] = link_data
+    print(json.dumps(graph))
+    if args.url is not None:
+        print(args.url)
+        url = urlparse.urlparse(args.url)
+        conn = httplib.HTTPSConnection(url.netloc)
+
+        params = urlparse.parse_qs(url.query)
+        print(params)
+        conn_path = url.path + "?key=" + params['key'][0]
+        print(conn_path)
+        params = json.dumps(graph)
+        #params = urllib.urlencode(params)
+        conn.request("POST", conn_path, params)
+        response = conn.getresponse()
+        print(response.status, response.reason)
+
     return
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
