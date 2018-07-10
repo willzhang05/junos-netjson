@@ -4,7 +4,8 @@ from junos import Junos_Context
 from jnpr.junos import Device
 from lxml import etree
 import jcs
-import httplib, urllib
+import httplib
+import urllib
 import uuid
 
 
@@ -38,9 +39,10 @@ def get_interface_ip_addresses(dev, ifl, primary_only=False):
 
 def get_node_info(dev):
     ifaces = []
-    addresses = []   
+    addresses = []
     output = dev.rpc.get_lldp_local_info()
-    mgmt_if_find = etree.XPath("//lldp-local-management-address-interface-name")
+    mgmt_if_find = etree.XPath(
+        "//lldp-local-management-address-interface-name")
     mgmt_if = mgmt_if_find(output)
     mgmt_if_name = ""
     if len(mgmt_if) != 0:
@@ -60,7 +62,7 @@ def get_node_info(dev):
 
     mgmt_addr_find = etree.XPath("//lldp-local-management-address-address")
     mgmt_addr = mgmt_addr_find(output)[0].text.strip()
-    
+
     hostname_find = etree.XPath("//lldp-local-system-name")
     hostname = hostname_find(output)[0].text.strip()
 
@@ -78,7 +80,7 @@ def get_node_info(dev):
     data['properties']['hostname'] = hostname
     data['properties']['address'] = mgmt_addr
     data['local_addresses'] = addresses
-    return (ifaces,data)
+    return (ifaces, data)
 
 
 def get_link_info(dev, node_data):
@@ -92,7 +94,7 @@ def get_link_info(dev, node_data):
         entry['source'] = node_data['id']
         entry['target'] = neighbor.text.strip()
         data.append(entry)
-    
+
     return data
 
 
