@@ -78,13 +78,14 @@ def get_node_info(dev):
     host_id = uuid.UUID(bytes=hex_host_id)
 
     data = {}
+
     data["id"] = chassis_id
     data["label"] = hostname + " - " + mgmt_addr
     data["properties"] = {}
     data["properties"]["hostname"] = hostname
     data["properties"]["address"] = mgmt_addr
     data["local_addresses"] = addresses
-    return (ifaces, data)
+    return data
 
 
 def get_link_info(dev, node_data):
@@ -103,34 +104,99 @@ def get_link_info(dev, node_data):
     return data
 
 
+def get_neighbor_info(dev):
+    output = dev.rpc.get_lldp_neighbors_information()
+    neighbor_find = etree.XPath("//lldp-neighbor-information")
+    neighbors = neighbor_find(output)
+    data = []
+    for neighbor in neighbors:
+        entry = {}
+        chassis_id_find = etree.XPath("//lldp-remote-chassis-id")
+        chassis_id = chassis_id_find(neighbor)[0].text
+
+        hostname_find = etree.XPath("//lldp-remote-system-name")
+        hostname = hostname_find(neighbor)[0].text
+        entry["id"] = chassis_id
+        entry["label"] = hostname
+        data.append(entry)
+
+    return data
+
+
 def main():
-    arguments = {"url": "API POST Endpoint to send NetJSON to."}
+    arguments = {"send": "API POST Endpoint to send NetJSON to.",
+                 "recv": "API GET Endpoint to receive NetJSON from."}
     parser = argparse.ArgumentParser(description="NetJSON op script")
     for key in arguments:
         parser.add_argument(('-' + key), required=False, help=arguments[key])
     args = parser.parse_args()
+    graph = {}
+    if args.recv is not None:
+        url = urlparse.urlparse(args.recv)
+        conn = httplib.HTTPSConnection(url.netloc)
+        params = urlparse.parse_qs(url.query)
+        conn_path = url.path + "?format=json"
+        conn.request("GET", conn_path)
+        response = conn.getresponse()
+        if response.status == 200:
+            graph = json.loads(response.read())
+            print(graph)
+            print()
+        else:
+            print("Invalid recv URL.")
+            return 1
 
     dev = Device()
     dev.open()
 
-    node_ifaces, node_data = get_node_info(dev)
+    node_data = get_node_info(dev)
     link_data = get_link_info(dev, node_data)
+    neighbor_data = get_neighbor_info(dev)
     dev.close()
-    graph = {}
+
     graph["type"] = "NetworkGraph"
     graph["protocol"] = "static"
-    graph["version"] = 1.0
-    graph["metric"] = 1.0
-    graph["nodes"] = [node_data]
-    graph["links"] = link_data
-    print(json.dumps(graph))
-    if args.url is not None:
-        print(args.url)
-        url = urlparse.urlparse(args.url)
-        conn = httplib.HTTPSConnection(url.netloc)
+    graph["version"] = "1.0"
+    graph["metric"] = "1.0"
 
+    if len(graph["nodes"]) != 0:
+        for node in graph["nodes"]:
+            if node["id"] == node_data["id"]:
+                node["label"] = node_data["label"]
+                node["local_addresses"] = node_data["local_addresses"]
+                node["properties"] = node_data["properties"]
+    else:
+        graph["nodes"].append(node_data)
+        graph["nodes"] += neighbor_data
+
+    links = []
+
+    if len(graph["links"]) != 0:
+        for existing_link in graph["links"]:
+            for local_link in link_data:
+                exists_locally = False
+                if existing_link["source"] == local_link["source"] and existing_link["target"] == local_link["target"] \
+                        or existing_link["source"] == local_link["target"] and existing_link["target"] == local_link["source"]:
+                    exists_locally = True
+                else:
+                    links.append(local_link)
+                if existing_link["source"] == node_data[
+                        "id"] or existing_link["target"] == node_data["id"]:
+                    if exists_locally:
+                        links.append(local_link)
+
+    else:
+        links += link_data
+
+    graph["links"] = links
+
+    print(json.dumps(graph))
+
+    if args.send is not None:
+        print(args.send)
+        url = urlparse.urlparse(args.send)
+        conn = httplib.HTTPSConnection(url.netloc)
         params = urlparse.parse_qs(url.query)
-        print(params)
         conn_path = url.path + "?key=" + params['key'][0]
         print(conn_path)
         params = json.dumps(graph)
@@ -138,7 +204,6 @@ def main():
         conn.request("POST", conn_path, params)
         response = conn.getresponse()
         print(response.status, response.reason)
-
     return
 
 
